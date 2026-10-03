@@ -92,10 +92,21 @@ class MossSoundEffectPipeline(torch.nn.Module):
     def _normalize_device(device: Union[str, torch.device]) -> str:
         requested = str(device)
         if requested == "auto":
-            return "cuda" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                return "cuda"
+            if torch.backends.mps.is_available():
+                return "mps"
+            return "cpu"
         if requested.startswith("cuda") and not torch.cuda.is_available():
+            fallback = "mps" if torch.backends.mps.is_available() else "cpu"
             print(
-                f"[Warning] Requested device '{requested}' but CUDA is unavailable. Falling back to CPU.",
+                f"[Warning] Requested device '{requested}' but CUDA is unavailable. Falling back to '{fallback}'.",
+                flush=True,
+            )
+            return fallback
+        if requested.startswith("mps") and not torch.backends.mps.is_available():
+            print(
+                f"[Warning] Requested device '{requested}' but MPS is unavailable. Falling back to CPU.",
                 flush=True,
             )
             return "cpu"

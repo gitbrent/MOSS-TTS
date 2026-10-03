@@ -16,8 +16,10 @@ def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
 
 
 def sinusoidal_embedding_1d(dim, position):
-    sinusoid = torch.outer(position.type(torch.float64), torch.pow(
-        10000, -torch.arange(dim//2, dtype=torch.float64, device=position.device).div(dim//2)))
+    # MPS does not support float64; float32 is sufficient for timestep embeddings.
+    work_dtype = torch.float32 if position.device.type == "mps" else torch.float64
+    sinusoid = torch.outer(position.type(work_dtype), torch.pow(
+        10000, -torch.arange(dim//2, dtype=work_dtype, device=position.device).div(dim//2)))
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x.to(position.dtype)
 
@@ -50,7 +52,9 @@ def precompute_freqs_cis(dim: int, end: int = 16384, theta: float = 10000.0, s: 
                    [: (dim // 2)].double() / dim))
     pos = torch.arange(end, dtype=torch.float64, device=freqs.device) * s
     freqs = torch.outer(pos, freqs)
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+    # float64 inputs make torch.polar return complex128, which MPS does not
+    # support; the RoPE tables are only ever consumed at float32 precision.
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs).to(torch.complex64)  # complex64
     return freqs_cis
 
 

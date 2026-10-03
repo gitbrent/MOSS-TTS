@@ -340,7 +340,7 @@ class WanAudioPipeline(BasePipeline):
         # Scheduler
         self.scheduler.set_timesteps(num_inference_steps, denoising_strength=denoising_strength, shift=sigma_shift)
         # print(f"{self.scheduler.timesteps = }")
-        
+
         # Inputs
         inputs_posi = {
             "prompt": prompt,
@@ -390,10 +390,10 @@ class WanAudioPipeline(BasePipeline):
             if timestep.item() < switch_DiT_boundary * self.scheduler.num_train_timesteps and self.dit2 is not None and not models["dit"] is self.dit2:
                 self.load_models_to_device(self.in_iteration_models_2)
                 models["dit"] = self.dit2
-                
+
             # Timestep
             timestep = timestep.unsqueeze(0).to(device=self.device)
-            
+
             # Inference
             torch.compiler.cudagraph_mark_step_begin()
             noise_pred_posi = self.model_fn(**models, **inputs_shared, **inputs_posi, timestep=timestep)
@@ -410,7 +410,7 @@ class WanAudioPipeline(BasePipeline):
             inputs_shared["latents"] = self.scheduler.step(noise_pred, self.scheduler.timesteps[progress_id], inputs_shared["latents"])
             if "first_frame_latents" in inputs_shared:
                 inputs_shared["latents"][:, :, 0:1] = inputs_shared["first_frame_latents"]
-        
+
         # VACE (TODO: remove it)
         # if vace_reference_image is not None:
         #     inputs_shared["latents"] = inputs_shared["latents"][:, :, 1:]
@@ -458,7 +458,7 @@ class WanAudioUnit_NoiseInitializer(PipelineUnit):
         shape = (bsz, pipe.audio_latent_dim, num_samples // pipe.num_samples_division_factor)
         noise = pipe.generate_noise(shape, seed=seed, rand_device=rand_device)
         return {"noise": noise}
-    
+
 
 
 class WanAudioUnit_InputAudioEmbedder(PipelineUnit):
@@ -584,7 +584,7 @@ class TeaCache:
         self.rel_l1_thresh = rel_l1_thresh
         self.previous_residual = None
         self.previous_hidden_states = None
-        
+
         self.coefficients_dict = {
             "Wan2.1-T2V-1.3B": [-5.21862437e+04, 9.23041404e+03, -5.28275948e+02, 1.36987616e+01, -4.99875664e-02],
             "Wan2.1-T2V-14B": [-3.03318725e+05, 4.90537029e+04, -2.65530556e+03, 5.87365115e+01, -3.15583525e-01],
@@ -636,7 +636,7 @@ class TemporalTiler_BCTHW:
         x = torch.ones((length,))
         if border_width == 0:
             return x
-        
+
         shift = 0.5
         if not left_bound:
             x[:border_width] = (torch.arange(border_width) + shift) / border_width
@@ -649,7 +649,7 @@ class TemporalTiler_BCTHW:
         t = self.build_1d_mask(T, is_bound[0], is_bound[1], border_width[0])
         mask = repeat(t, "T -> 1 1 T 1 1")
         return mask
-    
+
     def run(self, model_fn, sliding_window_size, sliding_window_stride, computation_device, computation_dtype, model_kwargs, tensor_names, batch_size=None):
         tensor_names = [tensor_name for tensor_name in tensor_names if model_kwargs.get(tensor_name) is not None]
         tensor_dict = {tensor_name: model_kwargs[tensor_name] for tensor_name in tensor_names}
@@ -681,7 +681,16 @@ class TemporalTiler_BCTHW:
 
 
 
-@torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
+def _maybe_compile_model_fn(fn):
+    # Keep the tuned inductor/cudagraphs path on CUDA. Elsewhere (e.g. Apple
+    # Silicon MPS, where triton is unavailable) run eagerly by default; set
+    # MOSS_AUDIO_COMPILE=1 to opt into torch.compile on non-CUDA backends.
+    if torch.cuda.is_available() or os.environ.get("MOSS_AUDIO_COMPILE", "0") == "1":
+        return torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)(fn)
+    return fn
+
+
+@_maybe_compile_model_fn
 def model_fn_wan_video(
     dit: WanAudioModel,
     motion_controller = None,
@@ -731,7 +740,7 @@ def model_fn_wan_video(
             tensor_names=["latents", "y"],
             batch_size=2 if cfg_merge else 1
         )
-    
+
     if use_unified_sequence_parallel:
         import torch.distributed as dist
         from xfuser.core.distributed import (get_sequence_parallel_rank,
@@ -757,7 +766,7 @@ def model_fn_wan_video(
             # print(f"{t.shape = }")
             t_mod = dit.time_projection(t).unflatten(1, (6, dit.dim))
             # print(f"{t_mod.shape = }")
-    
+
     # Motion Controller
     if motion_bucket_id is not None and motion_controller is not None:
         raise ValueError("not supported")
@@ -777,11 +786,11 @@ def model_fn_wan_video(
     if clip_feature is not None and dit.require_clip_embedding:
         clip_embdding = dit.img_emb(clip_feature)
         context = torch.cat([clip_embdding, context], dim=1)
-    
+
     # Add camera control
     x, (f, ) = dit.patchify(x, control_camera_latents_input)
     # print(f"{f = }")
-    
+
     # Reference image
     if reference_latents is not None:
         if len(reference_latents.shape) == 5:
@@ -789,7 +798,7 @@ def model_fn_wan_video(
         reference_latents = dit.ref_conv(reference_latents).flatten(2).transpose(1, 2)
         x = torch.concat([reference_latents, x], dim=1)
         f += 1
-    
+
     # freqs is now a registered buffer (moves with model.to(device)). Do not
     # write Python attributes here so torch.compile can trace through.
     audio_freqs = dit.freqs
@@ -798,16 +807,16 @@ def model_fn_wan_video(
         audio_freqs[1][:f].view(f, -1).expand(f, -1),
         audio_freqs[2][:f].view(f, -1).expand(f, -1),
     ], dim=-1).reshape(f, 1, -1)
-    
+
     # TeaCache
     if tea_cache is not None:
         tea_cache_update = tea_cache.check(dit, x, t_mod)
     else:
         tea_cache_update = False
-        
+
     if vace_context is not None:
         vace_hints = vace(x, vace_context, context, t_mod, freqs)
-    
+
     # blocks
     if use_unified_sequence_parallel:
         if dist.is_initialized() and dist.get_world_size() > 1:
@@ -822,7 +831,7 @@ def model_fn_wan_video(
             def custom_forward(*inputs):
                 return module(*inputs)
             return custom_forward
-        
+
         for block_id, block in enumerate(dit.blocks):
             if use_gradient_checkpointing_offload:
                 with torch.autograd.graph.save_on_cpu():
@@ -847,7 +856,7 @@ def model_fn_wan_video(
                 x = x + current_vace_hint * vace_scale
         if tea_cache is not None:
             tea_cache.store(x)
-            
+
     x = dit.head(x, t)
     if use_unified_sequence_parallel:
         if dist.is_initialized() and dist.get_world_size() > 1:

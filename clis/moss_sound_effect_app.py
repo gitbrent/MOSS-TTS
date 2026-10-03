@@ -19,20 +19,30 @@ from moss_soundeffect_v2 import MossSoundEffectPipeline
 
 
 DEFAULT_MODEL_DIR = os.environ.get("SOUNDEFFECT_MODEL_DIR", "/path/to/SoundEffect-v2-hf")
-DEFAULT_DEVICE = os.environ.get("SOUNDEFFECT_DEVICE", "cuda")
+DEFAULT_DEVICE = os.environ.get("SOUNDEFFECT_DEVICE", "auto")
 MAX_INFERENCE_SECONDS = 30
 
 
 @functools.lru_cache(maxsize=1)
 def load_backend(model_dir: str, device_str: str):
-    device = torch.device(device_str if torch.cuda.is_available() else "cpu")
+    if device_str == "auto":
+        if torch.cuda.is_available():
+            device_str = "cuda"
+        elif torch.backends.mps.is_available():
+            device_str = "mps"
+        else:
+            device_str = "cpu"
+
+    # bfloat16 on CUDA; plain float32 on MPS/CPU (MPS lacks float64 support and
+    # the RoPE/embedding tables are stored at float32 precision anyway).
+    model_dtype = torch.bfloat16 if device_str.startswith("cuda") and torch.cuda.is_available() else torch.float32
+
     pipe = MossSoundEffectPipeline.from_pretrained(
         model_dir,
-        torch_dtype=torch.bfloat16,
-        device=str(device),
+        torch_dtype=model_dtype,
+        device=device_str,
     )
-    return pipe, device
-
+    return pipe, pipe.device
 
 def run_inference(
     prompt: str,
@@ -85,16 +95,17 @@ def run_inference(
 def build_demo(args: argparse.Namespace):
     custom_css = """
     :root {
-      --bg: #f6f7f8;
-      --panel: #ffffff;
+      --bg: #31393f;
+      --panel: #010101;
       --ink: #111418;
       --muted: #4d5562;
       --line: #e5e7eb;
       --accent: #0f766e;
     }
     .gradio-container {
-      background: linear-gradient(180deg, #f7f8fa 0%, #f3f5f7 100%);
+      /* background: linear-gradient(180deg, #f7f8fa 0%, #f3f5f7 100%); */
       color: var(--ink);
+      font-size: 1.25rem !important;
     }
     .app-card {
       border: 1px solid var(--line);
@@ -170,8 +181,8 @@ def main():
     parser = argparse.ArgumentParser(description="MossSoundEffect Gradio Demo")
     parser.add_argument("--model_dir", type=str, default=DEFAULT_MODEL_DIR)
     parser.add_argument("--device", type=str, default=DEFAULT_DEVICE)
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=7861)
+    parser.add_argument("--host", type=str, default="192.168.254.99") # BRENT: was "0.0.0.0"
+    parser.add_argument("--port", type=int, default=8080) # BRENT: was: 7861
     parser.add_argument(
         "--root_path",
         type=str,

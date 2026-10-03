@@ -117,11 +117,11 @@ def build_demo(args: argparse.Namespace):
       --muted: #4d5562;
       --line: #e5e7eb;
       --accent: #0f766e;
+      font-size: 120%;
     }
     .gradio-container {
       /* background: linear-gradient(180deg, #f7f8fa 0%, #f3f5f7 100%); */
       color: var(--ink);
-      font-size: 1.25rem !important;
     }
     .app-card {
       border: 1px solid var(--line);
@@ -142,14 +142,16 @@ def build_demo(args: argparse.Namespace):
     #run-btn {
       background: var(--accent);
       border: none;
+      padding: 30px 10px;
+      font-size: 1.5rem;
     }
     """
 
-    with gr.Blocks(title="MOSS-SoundEffect v2.0", css=custom_css) as demo:
+    with gr.Blocks(title="MOSS-SFX", theme=gr.themes.Soft(), css=custom_css) as demo:
         gr.Markdown(
             """
             <div class="app-card">
-              <div class="app-title">MOSS-SoundEffect v2.0</div>
+              <div class="app-title">MOSS-SoundEffect | Mac Studio (v2.0)</div>
               <div class="app-subtitle">Text-to-audio diffusion (MossSoundEffectPipeline).</div>
             </div>
             """
@@ -194,7 +196,7 @@ def build_demo(args: argparse.Namespace):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MossSoundEffect Gradio Demo")
+    parser = argparse.ArgumentParser(description="MossSoundEffect Gradio Mac Studio")
     parser.add_argument("--model_dir", type=str, default=DEFAULT_MODEL_DIR)
     parser.add_argument("--device", type=str, default=DEFAULT_DEVICE)
     parser.add_argument("--host", type=str, default="192.168.254.99") # BRENT: was "0.0.0.0"

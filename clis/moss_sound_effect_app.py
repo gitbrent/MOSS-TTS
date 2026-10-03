@@ -3,13 +3,16 @@
 import argparse
 import functools
 import os
+import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import gradio as gr
 import numpy as np
 import torch
+from scipy.io import wavfile
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent
@@ -57,6 +60,14 @@ def run_inference(
     if not (prompt or "").strip():
         raise ValueError("Please enter a prompt describing the audio you want to generate.")
 
+    filename = "audio.wav"
+    prompt_slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")
+    if prompt_slug:
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        prompt_limit = 48 - len(timestamp) - len("-.wav")
+        prompt_slug = prompt_slug[:prompt_limit].rstrip("-")
+        filename = f"{prompt_slug}-{timestamp}.wav"
+
     seconds = round(float(seconds), 1)
     if seconds <= 0:
         raise ValueError("Duration must be greater than 0.")
@@ -82,6 +93,11 @@ def run_inference(
         audio_np = audio_np.T
     audio_np = audio_np.astype(np.float32, copy=False)
 
+    output_dir = Path(tempfile.gettempdir()) / "moss-sound-effect"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / filename
+    wavfile.write(str(output_path), pipe.sample_rate, audio_np)
+
     elapsed = time.monotonic() - started_at
     status = (
         f"Done | elapsed: {elapsed:.2f}s | "
@@ -89,7 +105,7 @@ def run_inference(
         f"cfg_scale={float(cfg_scale):.2f}, sigma_shift={float(sigma_shift):.2f}, "
         f"seed={int(seed)}"
     )
-    return (pipe.sample_rate, audio_np), status
+    return str(output_path), status
 
 
 def build_demo(args: argparse.Namespace):
@@ -157,7 +173,7 @@ def build_demo(args: argparse.Namespace):
                     seed = gr.Number(value=0, label="seed", precision=0)
                 run_btn = gr.Button("Generate Sound Effect", variant="primary", elem_id="run-btn")
             with gr.Column(scale=2):
-                output_audio = gr.Audio(label="Output Audio", type="numpy")
+                output_audio = gr.Audio(label="Output Audio", type="filepath")
                 status = gr.Textbox(label="Status", lines=4, interactive=False)
 
         run_btn.click(
